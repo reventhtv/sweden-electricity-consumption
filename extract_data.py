@@ -3,6 +3,7 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import datetime
+import pytz
 
 fields = ['Period', 'Avräknad (kWh)']
 df_nuclear = pd.read_excel("RawData/nuclearPowerProduktionsStatistik.xlsx", usecols=fields)
@@ -112,7 +113,7 @@ column_names = ['Year','Month','Day','Temperature_Raw','Temperature_Processed_1'
 temperatures_raw = pd.read_csv(url,sep ='\s+',names = column_names)
 
 temperatures_raw.to_csv("data/stockholm-daily-weather-data.csv", index=False)
-print(temperatures_raw.columns)
+#print(temperatures_raw.columns)
 
 temperatures_hourly = pd.read_csv("data/smhi-stockholm-hourly.csv")
 
@@ -168,14 +169,152 @@ print(df_elec_master)
 
 #df_weather_2015_2021.pop("Tid (UTC)")
 df_elec_result = pd.concat([df_elec_master,df_weather_2015_2021], axis=1)
-print(df_elec_result)
+#print(df_elec_result)
 
 df_elec_result.to_csv("data/result.csv", index=False)
 
 df_final = pd.read_csv("data/result.csv", parse_dates=['Date'], index_col=['Date'])
-
+print(df_final)
 sns.scatterplot(x='Lufttemperatur',y='SE3',data=df_final,palette="mako", alpha = 0.5)
-plt.title('Temperature vs Demand')
+plt.title('Temperature vs Consumption in Stockholm')
 plt.savefig('plots/stockholm_electricity_tempVsconsumption.png')
-plt.show()
+#plt.show()
+
+
+def temp_(x):
+    """
+    Divides the dataset into two categories based on the temperature
+    """
+    if x > 10:
+        return 'Hot'
+    else:
+        return 'NotHot'
+
+def peak_(x):
+    """
+    Divides the dataset into two categories based on the hour of the day
+    """
+    if x >= 7 and x <= 22:
+        return 'AwakeHours'
+    else:
+        return 'SleepHours'
+
+def weekday_(x):
+    """
+    Divides the dataset into two categories based on the day of the week
+    """
+    if x >= 5:
+        return 'Weekend'
+    else:
+        return 'Weekday'
+
+def dayofweek_(x):
+    """
+    Divides the dataset into seven categories based on the day of the week
+    """
+    if x == 0:
+        return 'Monday'
+    elif x == 1:
+        return 'Tuesday'
+    elif x == 2:
+        return 'Wednesday'
+    elif x == 3:
+        return 'Thursday'
+    elif x == 4:
+        return 'Friday'
+    elif x == 5:
+        return 'Saturday'
+    elif x == 6:
+        return 'Sunday'
+
+cet = pytz.timezone('Europe/Stockholm')
+def dst_index(x):
+    """
+    Divides the dataset into two categories based on whether or not daylight savings is in place
+    """
+    if cet.localize(x).dst().seconds == 0:
+        return "NoDST"
+    else:
+        return "DST"
+
+df_final['year'] = df_final.index.year
+
+df_final['month'] = df_final.index.month
+df_final['dayofweek'] = df_final.index.dayofweek
+df_final['day'] = df_final.index.day
+#print(df_final['year'], df_final['month'], df_final['dayofweek'], df_final['day'])
+
+df_final['temp_index'] = df_final['Lufttemperatur'].apply(temp_)
+#df_final['hour_index'] = df_final['Tid (UTC)'].apply(peak_)
+df_final['week_index'] = df_final['dayofweek'].apply(weekday_)
+#df_final['dst_index'] = [dst_index(x) for x in df_final.reset_index()['timestamp']]
+#print(df_final.head(20))
+
+for year in list(df_final['year'].unique()):
+    try:
+        df_final.loc[str(year) + '-01-01','week_index'] = 'Weekend'
+        df_final.loc[str(year) + '-05-01','week_index'] = 'Weekend'
+        df_final.loc[str(year) + '-12-24', 'week_index'] = 'Weekend'
+        df_final.loc[str(year) + '-12-25','week_index'] = 'Weekend'
+        df_final.loc[str(year) + '-12-26','week_index'] = 'Weekend'
+        df_final.loc[str(year) + '-12-31', 'week_index'] = 'Weekend'
+    except:
+        continue
+
+print(df_final.head(20))
+
+#fig, axes = plt.subplots(nrows=1, ncols=2)
+
+sns.scatterplot(x='Lufttemperatur',y='SE3',hue='temp_index',data=df_final,palette="mako", alpha = 0.5);
+plt.title('Temperature vs Consumption (Temperature) in Stockholm');
+plt.savefig('plots/stockholm_electricity_tempVsconsumption (temperature).png')
+
+sns.scatterplot(x='Lufttemperatur',y='SE3',hue='week_index',data=df_final,palette="mako", alpha = 0.5);
+plt.title('Temperature vs Consumption (Day of the week) in Stockholm');
+plt.savefig('plots/stockholm_electricity_tempVsconsumption (day of the week).png')
+
+def sections(x,y):
+    """
+    Divides the dataset into four sections as discussed above
+    """
+    if x == '18:00:00' and y == 'Hot':
+        return 'Section1'
+    elif x == '18:00:00' and y == 'NotHot':
+        return 'Section2'
+    elif x == '06:00:00' and y == 'NotHot':
+        return 'Section3'
+    elif x == '06:00:00' and y == 'Hot':
+        return 'Section4'
+
+
+df_final['sections'] = df_final.apply(lambda x: sections(x['Tid (UTC)'],x['temp_index']), axis=1)
+print(df_final.head(30))
+
+fig, axes = plt.subplots(nrows=2, ncols=2)
+
+sns.scatterplot(x='Lufttemperatur',y='SE3',data=df_final.query('sections == "Section1"'),ax=axes[0,0], alpha = 0.5);
+axes[0,0].set_title('Temperature vs Demand ');
+#plt.savefig('plots/stockholm_electricity_tempVsconsumption (section1).png')
+sns.scatterplot(x='Lufttemperatur',y='SE3',data=df_final.query('sections == "Section2"'),ax=axes[0,1], alpha = 0.5);
+axes[0,1].set_title('Temperature vs Demand ');
+#plt.savefig('plots/stockholm_electricity_tempVsconsumption (section2).png')
+sns.scatterplot(x='Lufttemperatur',y='SE3',data=df_final.query('sections == "Section3"'),ax=axes[1,0], alpha = 0.5);
+#axes[1,0].set_title('Temperature vs Demand ');
+#plt.savefig('plots/stockholm_electricity_tempVsconsumption (section3).png')
+sns.scatterplot(x='Lufttemperatur',y='SE3',data=df_final.query('sections == "Section4"'),ax=axes[1,1], alpha = 0.5);
+#axes[1,1].set_title('Temperature vs Demand ');
+plt.savefig('plots/stockholm_electricity_tempVsconsumption (section).png')
+
+
+fig, axes = plt.subplots(nrows=2, ncols=2)
+
+sns.scatterplot(x='Lufttemperatur',y='SE3',data=df_final.query('sections == "Section1"'),hue='week_index',ax=axes[0,0],palette="mako", alpha = 0.5);
+axes[0,0].set_title('Temperature vs Demand');
+sns.scatterplot(x='Lufttemperatur',y='SE3',data=df_final.query('sections == "Section2"'),hue='week_index',ax=axes[0,1],palette="mako", alpha = 0.5);
+axes[0,1].set_title('Temperature vs Demand');
+sns.scatterplot(x='Lufttemperatur',y='SE3',data=df_final.query('sections == "Section3"'),hue='week_index',ax=axes[1,0],palette="mako", alpha = 0.5);
+axes[1,0].set_title('Temperature vs Demand');
+sns.scatterplot(x='Lufttemperatur',y='SE3',data=df_final.query('sections == "Section4"'),hue='week_index',ax=axes[1,1],palette="mako", alpha = 0.5);
+axes[1,1].set_title('Temperature vs Demand');
+plt.savefig('plots/stockholm_electricity_tempVsconsumption (weekday).png')
 
